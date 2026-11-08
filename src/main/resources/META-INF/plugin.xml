@@ -1,0 +1,45 @@
+<idea-plugin>
+    <id>com.nyk.pubspecpilot</id>
+    <name>Pubspec Pilot for Flutter</name>
+    <vendor>NyK</vendor>
+
+    <idea-version since-build="241"/>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.yaml</depends>
+
+    <actions>
+        <action
+            id="PubspecPilot.RunFlutterPubGet"
+            class="com.nyk.pubspecpilot.action.RunFlutterPubGetAction"
+            text="Pubspec Pilot: Ejecutar flutter pub get"
+            description="Guarda pubspec.yaml y ejecuta flutter pub get en segundo plano">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Outdated package detector + QuickFix (Alt+Enter) strictly for YAML (pubspec.yaml) -->
+        <externalAnnotator
+            language="yaml"
+            implementationClass="com.nyk.pubspecpilot.annotator.PubspecOutdatedAnnotator"/>
+
+        <!-- Inline gray version hint at the end of outdated dependency lines in pubspec.yaml -->
+        <codeInsight.inlayProvider
+            language="yaml"
+            implementationClass="com.nyk.pubspecpilot.inlay.PubspecVersionInlayHintsProvider"/>
+
+        <!-- Smart package name & latest version auto-completion strictly for YAML (pubspec.yaml) -->
+        <completion.contributor
+            language="yaml"
+            order="first"
+            implementationClass="com.nyk.pubspecpilot.completion.PubspecPackageCompletionContributor"/>
+
+        <!-- Notification group for automatic flutter pub get feedback -->
+        <notificationGroup
+            id="PubspecPilot.Notifications"
+            displayType="BALLOON"
+            isLogByDefault="true"/>
+    </extensions>
+</idea-plugin>
