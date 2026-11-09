@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.nyk.pubspecpilot</id>
     <name>Pubspec Pilot for Flutter</name>
-    <vendor>NyK</vendor>
+    <vendor email="ingejpablo@gmail.com">Ing. Juan Pablo Gosalvez (NyK)</vendor>
 
     <idea-version since-build="241"/>
 

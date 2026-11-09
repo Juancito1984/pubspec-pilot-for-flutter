@@ -58,7 +58,8 @@ intellijPlatform {
         """.trimIndent()
 
         vendor {
-            name = "NyK"
+            name = "Ing. Juan Pablo Gosalvez (NyK)"
+            email = "ingejpablo@gmail.com"
         }
 
         ideaVersion {

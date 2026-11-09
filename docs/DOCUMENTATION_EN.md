@@ -1,4 +1,8 @@
-# Full Documentation — Pubspec Pilot for Flutter (by NyK)
+# Full Documentation — Pubspec Pilot for Flutter
+
+**Author:** Ing. Juan Pablo Gosalvez (NyK)  
+**Contact:** [ingejpablo@gmail.com](mailto:ingejpablo@gmail.com)  
+**License:** MIT  
 
 Lightweight, ultra-fast, and non-intrusive plugin for **Android Studio** and **IntelliJ IDEA**, exclusively tailored to optimize workflow inside the `pubspec.yaml` file of Flutter and Dart projects, **with zero interference to Dart source code analysis or IntelliSense**.
 

@@ -3,9 +3,10 @@
 [![Platform](https://img.shields.io/badge/Platform-Android%20Studio%20%7C%20IntelliJ%20IDEA-042B59.svg)](https://plugins.jetbrains.com/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.1.20-7F52FF.svg)](https://kotlinlang.org/)
 [![Gradle](https://img.shields.io/badge/Gradle-9.9.0-02303A.svg)](https://gradle.org/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Author](https://img.shields.io/badge/Author-Ing.%20Juan%20Pablo%20Gosalvez%20(NyK)-blue.svg)](mailto:ingejpablo@gmail.com)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Plugin ligero, rápido y no intrusivo para **Android Studio** e **IntelliJ IDEA** dedicado exclusivamente a optimizar el archivo `pubspec.yaml` en proyectos Flutter y Dart — **sin interferir jamás con el IntelliSense de código Dart**.
+Lightweight, high-performance, and non-intrusive plugin for **Android Studio** and **IntelliJ IDEA** created by **Ing. Juan Pablo Gosalvez (NyK)** ([ingejpablo@gmail.com](mailto:ingejpablo@gmail.com)), dedicated exclusively to enhancing `pubspec.yaml` in Flutter & Dart projects — **with zero interference to Dart code IntelliSense**.
 
 ---
 
