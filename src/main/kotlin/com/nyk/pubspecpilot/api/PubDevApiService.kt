@@ -80,17 +80,21 @@ class PubDevApiService {
     }
 
     /**
-     * Returns local popular + cached search matches immediately without any network I/O.
+     * Returns local popular + cached search matches + offline pub cache packages immediately without any network I/O.
      */
     fun getInstantLocalMatches(query: String): List<String> {
         val cleanQuery = query.trim().lowercase()
+        val localPubCacheService = com.nyk.pubspecpilot.cache.LocalPubCacheService.getInstance()
+        val diskMatches = localPubCacheService.getLocalPackagesMatching(cleanQuery).map { (name) -> name }
+
         if (cleanQuery.isEmpty()) {
-            return POPULAR_PACKAGES.take(20)
+            return (POPULAR_PACKAGES.asSequence() + diskMatches.asSequence()).distinct().take(25).toList()
         }
         val startsWithMatches = POPULAR_PACKAGES.filter { it.startsWith(cleanQuery) }
+        val cachedPackageMatches = packageCache.keys.filter { it.startsWith(cleanQuery) }
         val containsMatches = POPULAR_PACKAGES.filter { !it.startsWith(cleanQuery) && it.contains(cleanQuery) }
         val cachedSearch = searchCache[cleanQuery]?.second ?: emptyList()
-        return (startsWithMatches + containsMatches + cachedSearch).distinct()
+        return (diskMatches + startsWithMatches + cachedPackageMatches + containsMatches + cachedSearch).distinct()
     }
 
     /**
@@ -263,7 +267,20 @@ class PubDevApiService {
         } catch (e: Exception) {
             negativeCache[normalized] = System.currentTimeMillis()
             log.debug("Could not fetch pub.dev info for '$normalized': ${e.message}")
-            null
+
+            // Offline Fallback: If network is unreachable, check if the package is available in local Pub Cache
+            val localPkg = com.nyk.pubspecpilot.cache.LocalPubCacheService.getInstance().getLocalPackage(normalized)
+            if (localPkg != null) {
+                PubPackageInfo(
+                    name = normalized,
+                    latestStableVersion = localPkg.latestVersion,
+                    latestVersion = localPkg.latestVersion,
+                    description = "Paquete disponible localmente en Pub Cache (modo offline)",
+                    recentVersions = localPkg.installedVersions
+                )
+            } else {
+                null
+            }
         }
     }
 
@@ -273,9 +290,40 @@ class PubDevApiService {
     }
 
     /**
-     * Searches pub.dev for packages matching the query prefix with request deduplication and background prefetching.
+     * Executes a raw search query against pub.dev search endpoint and returns package names.
      */
-    fun searchPackages(query: String, timeoutMs: Int = 1800): List<String> {
+    private fun querySearchEndpoint(queryParam: String, timeoutMs: Int): List<String> {
+        return try {
+            val encoded = URLEncoder.encode(queryParam, StandardCharsets.UTF_8)
+            val url = "$PUB_API_BASE/search?q=$encoded"
+            val responseJson = HttpRequests.request(url)
+                .accept("application/vnd.pub.v2+json")
+                .gzip(true)
+                .connectTimeout(timeoutMs)
+                .readTimeout(timeoutMs)
+                .readString()
+
+            val root = JsonParser.parseString(responseJson).asJsonObject
+            val packagesArray = root.getAsJsonArray("packages") ?: return emptyList()
+            val results = ArrayList<String>(packagesArray.size())
+            for (element in packagesArray) {
+                val pkgName = element.asJsonObject.get("package")?.asString
+                if (!pkgName.isNullOrBlank()) {
+                    results.add(pkgName)
+                }
+            }
+            results
+        } catch (e: Exception) {
+            log.debug("Search query '$queryParam' on pub.dev failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * Searches pub.dev for packages matching the query prefix with request deduplication and background prefetching.
+     * Prioritizes package name prefix matches (package:query) and exact package lookups over generic popularity.
+     */
+    fun searchPackages(query: String, timeoutMs: Int = 2000): List<String> {
         val cleanQuery = query.trim().lowercase()
         if (cleanQuery.isEmpty()) {
             prefetchPackagesAsync(POPULAR_PACKAGES.take(8))
@@ -291,33 +339,56 @@ class PubDevApiService {
             return combined
         }
 
+        val isPackagePattern = PubspecYamlUtils.PACKAGE_NAME_REGEX.matches(cleanQuery)
+
         val future = inFlightSearchRequests.computeIfAbsent(cleanQuery) {
             CompletableFuture.supplyAsync({
                 try {
-                    val encoded = URLEncoder.encode(cleanQuery, StandardCharsets.UTF_8)
-                    val url = "$PUB_API_BASE/search?q=$encoded"
-                    val responseJson = HttpRequests.request(url)
-                        .accept("application/vnd.pub.v2+json")
-                        .gzip(true)
-                        .connectTimeout(timeoutMs)
-                        .readTimeout(timeoutMs)
-                        .readString()
+                    // 1. Prefix query: strictly matches package names on pub.dev (e.g. package:flutter_circle)
+                    val prefixFuture = CompletableFuture.supplyAsync({
+                        querySearchEndpoint("package:$cleanQuery", timeoutMs)
+                    }, httpExecutor)
 
-                    val root = JsonParser.parseString(responseJson).asJsonObject
-                    val packagesArray = root.getAsJsonArray("packages")
-                    val results = ArrayList<String>(16)
-                    if (packagesArray != null) {
-                        for (element in packagesArray) {
-                            val pkgName = element.asJsonObject.get("package")?.asString
-                            if (!pkgName.isNullOrBlank()) {
-                                results.add(pkgName)
-                            }
-                        }
+                    // 2. Generic full-text query: matches words in descriptions/tags
+                    val generalFuture = CompletableFuture.supplyAsync({
+                        querySearchEndpoint(cleanQuery, timeoutMs)
+                    }, httpExecutor)
+
+                    // 3. Exact package lookup if query is a syntactically valid package name
+                    val exactFuture = if (isPackagePattern) {
+                        CompletableFuture.supplyAsync({
+                            if (packageCache.containsKey(cleanQuery)) {
+                                cleanQuery
+                            } else if (!isRecentlyFailed(cleanQuery)) {
+                                val info = fetchPackageInfoOverHttp(cleanQuery, timeoutMs)
+                                if (info != null) cleanQuery else null
+                            } else null
+                        }, httpExecutor)
+                    } else null
+
+                    val allFutures = listOfNotNull(prefixFuture, generalFuture, exactFuture)
+                    try {
+                        CompletableFuture.allOf(*allFutures.toTypedArray()).get(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+                    } catch (_: Exception) {
+                        // Continue with whichever completed within timeout
                     }
+
+                    val prefixResults = try { prefixFuture.getNow(emptyList()) } catch (_: Exception) { emptyList() }
+                    val generalResults = try { generalFuture.getNow(emptyList()) } catch (_: Exception) { emptyList() }
+                    val exactMatch = try { exactFuture?.getNow(null) } catch (_: Exception) { null }
+
+                    val orderedResults = LinkedHashSet<String>(32)
+                    if (exactMatch != null) {
+                        orderedResults.add(exactMatch)
+                    }
+                    orderedResults.addAll(prefixResults)
+                    orderedResults.addAll(generalResults)
+
+                    val results = orderedResults.toList()
                     searchCache[cleanQuery] = System.currentTimeMillis() to results
                     results
                 } catch (e: Exception) {
-                    log.debug("Search on pub.dev failed for '$cleanQuery': ${e.message}")
+                    log.debug("Combined search on pub.dev failed for '$cleanQuery': ${e.message}")
                     emptyList()
                 } finally {
                     inFlightSearchRequests.remove(cleanQuery)

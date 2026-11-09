@@ -51,8 +51,8 @@ intellijPlatform {
             <b>Features:</b>
             <ul>
                 <li><b>Outdated Package Detection:</b> Highlights outdated dependencies in <code>pubspec.yaml</code> with inline version hints and one-click Quick Fix updates.</li>
-                <li><b>Smart Package Auto-Completion:</b> Search and autocomplete packages directly from <code>pub.dev</code> with their latest stable version automatically inserted.</li>
-                <li><b>Automatic <code>flutter pub get</code>:</b> Automatically downloads and syncs packages right after inserting or updating a dependency.</li>
+                <li><b>Hybrid Package Auto-Completion (Online &amp; Offline):</b> Search and autocomplete packages directly from <code>pub.dev</code> with strict prefix matching, and automatically fallback to system local <code>Pub Cache</code> when offline.</li>
+                <li><b>Automatic <code>flutter pub get</code>:</b> Automatically syncs packages in the background after inserting or updating a dependency, with graceful automatic fallback to <code>--offline</code> if internet is unreachable.</li>
                 <li><b>Zero Dart IntelliSense Interference:</b> Operates strictly on <code>pubspec.yaml</code> so it never slows down or blocks Dart code completion.</li>
             </ul>
         """.trimIndent()

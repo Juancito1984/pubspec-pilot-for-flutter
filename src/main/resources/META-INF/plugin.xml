@@ -5,6 +5,27 @@
 
     <idea-version since-build="241"/>
 
+    <description><![CDATA[
+    Lightweight, fast, and non-intrusive assistant for Flutter &amp; Dart <code>pubspec.yaml</code> files by <b>NyK</b>.<br/><br/>
+    <b>Features:</b>
+    <ul>
+        <li><b>Outdated Package Detection:</b> Highlights outdated dependencies in <code>pubspec.yaml</code> with inline version hints and one-click Quick Fix updates.</li>
+        <li><b>Hybrid Package Auto-Completion (Online &amp; Offline):</b> Search and autocomplete packages directly from <code>pub.dev</code> with strict prefix matching, and automatically fallback to system local <code>Pub Cache</code> when offline.</li>
+        <li><b>Automatic <code>flutter pub get</code>:</b> Automatically syncs packages in the background after inserting or updating a dependency, with graceful automatic fallback to <code>--offline</code> if internet is unreachable.</li>
+        <li><b>Zero Dart IntelliSense Interference:</b> Operates strictly on <code>pubspec.yaml</code> so it never slows down or blocks Dart code completion.</li>
+    </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[
+    <b>Version 1.0.0</b>
+    <ul>
+        <li>Initial release of Pubspec Pilot for Flutter.</li>
+        <li>Real-time outdated dependency detection with one-click Quick Fixes and interactive Inlay Hints.</li>
+        <li>Hybrid smart auto-completion (online from pub.dev with strict prefix filtering, and automatic offline fallback to system Pub Cache).</li>
+        <li>Automatic background <code>flutter pub get</code> with graceful retry via <code>--offline</code> when internet is disconnected.</li>
+    </ul>
+    ]]></change-notes>
+
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.yaml</depends>
 

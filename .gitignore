@@ -4,3 +4,9 @@
 /build/
 /build/classes/
 /build/classes/kotlin/main/
+
+# Local developer SDK configuration
+local.properties
+
+# IDE private caches
+.idea/caches/

@@ -2,6 +2,7 @@ package com.nyk.pubspecpilot.runner
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
+import com.intellij.execution.process.ProcessOutput
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
@@ -29,6 +30,7 @@ object FlutterPubGetRunner {
 
     /**
      * Saves pubspec.yaml to disk and runs `flutter pub get` asynchronously in the background.
+     * If the machine has no internet or pub.dev is unreachable, automatically retries with `--offline`.
      * Supersedes any in-flight `flutter pub get` on the same project to prevent Flutter lock contention.
      */
     fun runPubGet(project: Project, pubspecVirtualFile: VirtualFile?, reasonLabel: String) {
@@ -54,41 +56,43 @@ object FlutterPubGetRunner {
             ProgressManager.getInstance().run(
                 object : Task.Backgroundable(
                     project,
-                    "Pubspec Pilot: Ejecutando flutter pub get ($reasonLabel)...",
+                    "Pubspec Pilot: Sincronizando dependencias ($reasonLabel)...",
                     true
                 ) {
                     override fun run(indicator: ProgressIndicator) {
                         indicator.isIndeterminate = true
-                        indicator.text = "Descargando paquetes ($reasonLabel)..."
+                        indicator.text = "Sincronizando dependencias ($reasonLabel)..."
 
-                        val flutterExec = resolveFlutterExecutable(workDirPath)
-                        val commandLine = GeneralCommandLine()
-                            .withExePath(flutterExec)
-                            .withParameters("pub", "get")
-                            .withWorkDirectory(workDirPath)
-                            .withCharset(StandardCharsets.UTF_8)
-                            .withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.CONSOLE)
-
-                        var handler: CapturingProcessHandler? = null
                         try {
-                            handler = CapturingProcessHandler(commandLine)
-                            activeProcesses[workDirPath] = handler
+                            val flutterExec = resolveFlutterExecutable(workDirPath)
+                            var isOfflineRun = false
 
-                            val output = handler.runProcessWithProgressIndicator(indicator, 120_000)
+                            var output = executePubGet(flutterExec, workDirPath, offline = false, indicator)
 
-                            // If cancelled or superseded by a newer run, exit silently
-                            if (indicator.isCanceled || activeProcesses[workDirPath] != handler) {
-                                return
+                            // If failed with a network/socket error, automatically fallback to `flutter pub get --offline`
+                            val combinedOutput = output.stderr + "\n" + output.stdout
+                            if (output.exitCode != 0 && isNetworkOrSocketError(combinedOutput)) {
+                                indicator.text = "Red no disponible. Reintentando flutter pub get en modo offline..."
+                                val offlineOutput = executePubGet(flutterExec, workDirPath, offline = true, indicator)
+                                if (offlineOutput.exitCode == 0) {
+                                    output = offlineOutput
+                                    isOfflineRun = true
+                                } else {
+                                    output = offlineOutput
+                                }
                             }
 
-                            // Refresh only the files touched by `flutter pub get` instead of scanning the entire project tree
+                            if (indicator.isCanceled) return
+
+                            // Refresh only the files touched by `flutter pub get`
                             refreshPubFilesOnly(workDirPath, pubspecVirtualFile)
 
                             if (output.exitCode == 0) {
+                                val modeSuffix = if (isOfflineRun) " (modo offline desde Pub Cache)" else ""
                                 notify(
                                     project,
                                     "Pubspec Pilot",
-                                    "Paquete sincronizado ($reasonLabel) — <code>flutter pub get</code> completado.",
+                                    "Paquete sincronizado ($reasonLabel)$modeSuffix — <code>flutter pub get</code> completado con éxito.",
                                     NotificationType.INFORMATION
                                 )
                             } else if (!output.isCancelled) {
@@ -113,14 +117,55 @@ object FlutterPubGetRunner {
                                 )
                             }
                         } finally {
-                            if (handler != null) {
-                                activeProcesses.remove(workDirPath, handler)
-                            }
+                            activeProcesses.remove(workDirPath)
                         }
                     }
                 }
             )
         }
+    }
+
+    private fun executePubGet(
+        flutterExec: String,
+        workDirPath: String,
+        offline: Boolean,
+        indicator: ProgressIndicator
+    ): ProcessOutput {
+        val params = if (offline) {
+            listOf("pub", "get", "--offline")
+        } else {
+            listOf("pub", "get")
+        }
+
+        val commandLine = GeneralCommandLine()
+            .withExePath(flutterExec)
+            .withParameters(params)
+            .withWorkDirectory(workDirPath)
+            .withCharset(StandardCharsets.UTF_8)
+            .withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.CONSOLE)
+
+        val handler = CapturingProcessHandler(commandLine)
+        activeProcesses[workDirPath] = handler
+
+        return try {
+            handler.runProcessWithProgressIndicator(indicator, 120_000)
+        } finally {
+            activeProcesses.remove(workDirPath, handler)
+        }
+    }
+
+    private fun isNetworkOrSocketError(output: String): Boolean {
+        val lower = output.lowercase()
+        return lower.contains("socket error") ||
+                lower.contains("failed to connect") ||
+                lower.contains("network is unreachable") ||
+                lower.contains("connection refused") ||
+                lower.contains("connection reset") ||
+                lower.contains("timed out") ||
+                lower.contains("could not resolve host") ||
+                lower.contains("errno = 11001") ||
+                lower.contains("os error: the remote computer refused") ||
+                (lower.contains("pub.dev") && lower.contains("failed"))
     }
 
     /**

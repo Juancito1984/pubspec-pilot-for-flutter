@@ -101,18 +101,18 @@ private class PubspecCompletionProvider : CompletionProvider<CompletionParameter
 
         // STAGE 2: Query pub.dev search and enrich top uncached results in parallel
         ProgressManager.checkCanceled()
-        val remotePackages = apiService.searchPackages(prefix, timeoutMs = 1500)
+        val remotePackages = apiService.searchPackages(prefix, timeoutMs = 2000)
             .filter { it !in emittedPackages }
-            .take(15)
+            .take(20)
 
         if (remotePackages.isEmpty()) return
 
-        // Parallel fetch for top 4 new packages with a tight 700ms ceiling so UI stays snappy
-        val topToFetch = remotePackages.take(4)
+        // Parallel fetch for top 5 new packages with a 900ms ceiling so UI stays snappy
+        val topToFetch = remotePackages.take(5)
         val fetchedMap = apiService.getPackagesInfoParallel(
             packageNames = topToFetch,
-            perRequestTimeoutMs = 900,
-            overallDeadlineMs = 700L
+            perRequestTimeoutMs = 1200,
+            overallDeadlineMs = 900L
         )
 
         for ((index, pkgName) in remotePackages.withIndex()) {
@@ -135,11 +135,20 @@ private class PubspecCompletionProvider : CompletionProvider<CompletionParameter
         isTopPriority: Boolean,
         priority: Double
     ): com.intellij.codeInsight.lookup.LookupElement {
-        val typeText = if (latestVersion != null) "^$latestVersion" else "pub.dev"
-        val tailText = if (latestVersion != null) {
-            ": ^$latestVersion  (descargar con flutter pub get)"
-        } else {
-            "  (obtener última versión de pub.dev)"
+        val localPkg = com.nyk.pubspecpilot.cache.LocalPubCacheService.getInstance().getLocalPackage(pkgName)
+        val isOfflineOnly = latestVersion == null && localPkg != null
+        val effectiveVersion = latestVersion ?: localPkg?.latestVersion
+
+        val typeText = when {
+            effectiveVersion != null && isOfflineOnly -> "^$effectiveVersion (local)"
+            effectiveVersion != null -> "^$effectiveVersion"
+            else -> "pub.dev"
+        }
+
+        val tailText = when {
+            effectiveVersion != null && isOfflineOnly -> ": ^$effectiveVersion  (disponible en pub cache local offline)"
+            effectiveVersion != null -> ": ^$effectiveVersion  (descargar con flutter pub get)"
+            else -> "  (obtener última versión de pub.dev)"
         }
 
         val element = LookupElementBuilder.create(pkgName)
@@ -149,8 +158,9 @@ private class PubspecCompletionProvider : CompletionProvider<CompletionParameter
             .withTypeText(typeText, true)
             .withInsertHandler { insertionContext, _ ->
                 // Check cache again at insertion time in case background prefetch completed while menu was open
-                val freshVersion = latestVersion
+                val freshVersion = effectiveVersion
                     ?: PubDevApiService.getInstance().getCachedPackageInfo(pkgName)?.latestStableVersion
+                    ?: com.nyk.pubspecpilot.cache.LocalPubCacheService.getInstance().getLocalPackage(pkgName)?.latestVersion
                 handlePackageNameInsertion(
                     insertionContext = insertionContext,
                     pkgName = pkgName,
@@ -238,19 +248,24 @@ private class PubspecCompletionProvider : CompletionProvider<CompletionParameter
     ) {
         ProgressManager.checkCanceled()
         val apiService = PubDevApiService.getInstance()
+        val localPkg = com.nyk.pubspecpilot.cache.LocalPubCacheService.getInstance().getLocalPackage(pkgName)
         val info = apiService.getCachedPackageInfo(pkgName)
             ?: apiService.getPackageInfo(pkgName, timeoutMs = 1800)
-            ?: return
+
+        val latestVersion = info?.latestStableVersion ?: localPkg?.latestVersion ?: return
+        val allRecentVersions = (info?.recentVersions ?: localPkg?.installedVersions ?: listOf(latestVersion)).distinct()
 
         val customResult = result.withPrefixMatcher(PlainPrefixMatcher(versionPrefix))
-        val latestConstraint = "^${info.latestStableVersion}"
+        val latestConstraint = "^$latestVersion"
+        val isOfflineOnly = (info == null)
 
         // 1. Recommended caret version (^X.Y.Z)
+        val tailDesc = if (isOfflineOnly) "  (instalado localmente en pub cache)" else "  (última versión estable en pub.dev)"
         val recommendedElement = LookupElementBuilder.create(latestConstraint)
             .withIcon(AllIcons.Nodes.PpLib)
             .withBoldness(true)
-            .withTailText("  (última versión estable en pub.dev)", true)
-            .withTypeText("Recomendado", true)
+            .withTailText(tailDesc, true)
+            .withTypeText(if (isOfflineOnly) "Local" else "Recomendado", true)
             .withInsertHandler { insertionContext, _ ->
                 replaceVersionOnLineAndRunPubGet(insertionContext, pkgName, latestConstraint)
             }
@@ -258,13 +273,13 @@ private class PubspecCompletionProvider : CompletionProvider<CompletionParameter
         customResult.addElement(PrioritizedLookupElement.withPriority(recommendedElement, 2000.0))
 
         // 2. Other recent versions
-        for ((idx, ver) in info.recentVersions.withIndex()) {
+        for ((idx, ver) in allRecentVersions.withIndex()) {
             val caretVer = "^$ver"
             if (caretVer == latestConstraint) continue
 
             val verElement = LookupElementBuilder.create(caretVer)
                 .withIcon(AllIcons.Nodes.PpLib)
-                .withTypeText("pub.dev", true)
+                .withTypeText(if (isOfflineOnly) "pub cache" else "pub.dev", true)
                 .withInsertHandler { insertionContext, _ ->
                     replaceVersionOnLineAndRunPubGet(insertionContext, pkgName, caretVer)
                 }
